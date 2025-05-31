@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>DocLocked - Document Tampering Detection</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 30px;
+      font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+      background-color: #121212;
+      color: #eeeeee;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    h1 {
+      font-size: 2.8rem;
+      margin-bottom: 10px;
+      color: #1e90ff;
+    }
+    video {
+      width: 100%;
+      max-width: 360px;
+      height: auto;
+      border-radius: 12px;
+      border: 3px solid #1e90ff;
+      background-color: #000;
+    }
+    button {
+      margin-top: 20px;
+      padding: 12px 36px;
+      font-size: 1.1rem;
+      background-color: #1e90ff;
+      border: none;
+      border-radius: 8px;
+      color: #ffffff;
+      cursor: pointer;
+    }
+    button:hover {
+      background-color: #005bbb;
+    }
+    #result {
+      margin-top: 30px;
+      font-weight: 700;
+      font-size: 1.4rem;
+    }
+  </style>
+</head>
+<body>
+  <h1>DocLocked</h1>
+  <video id="video" autoplay playsinline></video>
+  <button id="scan-btn">Scan Document</button>
+  <div id="result"></div>
+
+  <script>
+    const scanBtn = document.getElementById('scan-btn');
+    const video = document.getElementById('video');
+    const resultDiv = document.getElementById('result');
+
+    scanBtn.addEventListener('click', () => {
+    const canvas = document.createElement('canvas');
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+    const imgData = canvas.toDataURL('image/jpeg');
+
+    fetch('/scan', {
+     method: 'POST',
+     headers: {'Content-Type': 'application/json'},
+     body: JSON.stringify({ image: imgData })
+    })
+    .then(res => res.json())
+    .then(data => {
+     if(data.error) {
+          resultDiv.textContent = 'Error: ' + data.error;
+     } else {
+          resultDiv.textContent = `Prediction: ${data.class} (${(data.confidence*100).toFixed(2)}%)`;
+        }
+     })
+    .catch(err => {
+     resultDiv.textContent = 'Error: ' + err.message;
+     });
+    });
+
+  </script>
+</body>
+</html>
