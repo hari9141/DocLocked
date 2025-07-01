@@ -1,0 +1,135 @@
+import cv2
+import numpy as np
+from tensorflow.keras.models import load_model
+from skimage.metrics import structural_similarity as ssim
+import imutils
+
+class DocumentVerifier:
+    def __init__(self, model_path):
+        self.model = load_model(model_path)
+        self.reference_template = None  # Load your template here if available
+        
+    def verify_document(self, image):
+        # Step 1: Preprocessing and Alignment Check
+        aligned, alignment_score = self.check_alignment(image)
+        if not aligned:
+            return "Misaligned Document", 0.0, {"alignment_score": alignment_score}
+        
+        # Step 2: Structural Integrity Check
+        structure_score = self.check_structural_integrity(image)
+        if structure_score < 0.7:
+            return "Structural Tampering Detected", 0.0, {"structure_score": structure_score}
+        
+        # Step 3: Texture Analysis
+        texture_score = self.analyze_texture(image)
+        
+        # Step 4: Deep Learning Prediction
+        prediction, confidence = self.predict_with_model(image)
+        
+        # Combined decision
+        final_score = 0.4*confidence + 0.3*structure_score + 0.2*texture_score + 0.1*alignment_score
+        final_decision = "original" if final_score >= 0.65 else "fake"
+        
+        return final_decision, final_score, {
+            "alignment_score": alignment_score,
+            "structure_score": structure_score,
+            "texture_score": texture_score,
+            "model_confidence": confidence
+        }
+    
+    def check_alignment(self, image):
+        # Convert to grayscale and threshold
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+        
+        # Find contours
+        contours = cv2.findContours(thresh.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        contours = imutils.grab_contours(contours)
+        
+        if len(contours) == 0:
+            return False, 0.0
+        
+        # Get largest contour
+        largest_contour = max(contours, key=cv2.contourArea)
+        
+        # Check if quadrilateral
+        peri = cv2.arcLength(largest_contour, True)
+        approx = cv2.approxPolyDP(largest_contour, 0.02 * peri, True)
+        
+        alignment_score = 1.0 if len(approx) == 4 else 0.3
+        return len(approx) == 4, alignment_score
+    
+    def check_structural_integrity(self, image):
+        if self.reference_template is None:
+            # Fallback to general structural checks
+            gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+            
+            # Check for obvious cloning/duplication
+            # Using Fourier Transform to detect repeating patterns
+            f = np.fft.fft2(gray)
+            fshift = np.fft.fftshift(f)
+            magnitude_spectrum = 20*np.log(np.abs(fshift))
+            
+            # Analyze the spectrum for anomalies
+            mean_val = np.mean(magnitude_spectrum)
+            std_val = np.std(magnitude_spectrum)
+            anomaly_score = min(std_val/50, 1.0)  # Normalize
+            
+            return 1.0 - anomaly_score
+        else:
+            # Compare with reference template
+            return self.compare_with_template(image)
+    
+    def analyze_texture(self, image):
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        
+        # Calculate Local Binary Pattern variance
+        lbp = self.local_binary_pattern(gray, 8, 1)
+        lbp_var = np.var(lbp)
+        
+        # Normalize to 0-1 range (empirical values may need adjustment)
+        texture_score = min(lbp_var / 500, 1.0)
+        return texture_score
+    
+    def predict_with_model(self, image):
+        # Preprocess image for model
+        processed = self.preprocess_image(image)
+        prediction = self.model.predict(np.expand_dims(processed, axis=0))
+        predicted_class = "original" if prediction[0][0] > 0.5 else "fake"
+        confidence = float(prediction[0][0] if predicted_class == "original" else 1 - prediction[0][0])
+        return predicted_class, confidence
+    
+    def preprocess_image(self, image):
+        # Resize and normalize
+        image = cv2.resize(image, (256, 256))
+        image = image.astype('float32') / 255.0
+        return image
+    
+    def local_binary_pattern(self, image, points, radius):
+        # LBP implementation
+        lbp = np.zeros_like(image)
+        for i in range(radius, image.shape[0] - radius):
+            for j in range(radius, image.shape[1] - radius):
+                center = image[i,j]
+                binary_code = 0
+                for p in range(points):
+                    x = i + int(radius * np.cos(2*np.pi*p/points))
+                    y = j - int(radius * np.sin(2*np.pi*p/points))
+                    binary_code |= (image[x,y] >= center) << p
+                lbp[i,j] = binary_code
+        return lbp
+
+# Usage Example
+if __name__ == "__main__":
+    verifier = DocumentVerifier("doclocked_model.h5")
+    
+    # Load your test image
+    image = cv2.imread("test_document.jpg")
+    
+    if image is not None:
+        decision, score, details = verifier.verify_document(image)
+        print(f"Final Decision: {decision}")
+        print(f"Confidence Score: {score:.2f}")
+        print("Detailed Scores:", details)
+    else:
+        print("Error loading image")
